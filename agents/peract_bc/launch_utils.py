@@ -21,6 +21,7 @@ from helpers.clip.core.clip import tokenize
 from agents.peract_bc.perceiver_lang_io import PerceiverVoxelLangEncoder
 from agents.peract_bc.qattention_peract_bc_agent import QAttentionPerActBCAgent
 from agents.peract_bc.qattention_stack_agent import QAttentionStackAgent
+from helpers.features.clip_extract import CLIPEmbedder, CLIPArgs, update_clip_embs
 
 import torch
 import torch.nn as nn
@@ -38,7 +39,9 @@ def create_replay(batch_size: int, timesteps: int,
                   save_dir: str, cameras: list,
                   voxel_sizes,
                   image_size=[128, 128],
-                  replay_size=3e5):
+                  replay_size=3e5,
+                  dense_clip_sims=False,
+                  no_rgb=False):
 
     trans_indicies_size = 3 * len(voxel_sizes)
     rot_and_grip_indicies_size = (3 + 1)
@@ -48,6 +51,13 @@ def create_replay(batch_size: int, timesteps: int,
     lang_feat_dim = 1024
     lang_emb_dim = 512
 
+    rgb_feats = 3
+    if dense_clip_sims:
+        if no_rgb:
+            rgb_feats = 1
+        else:
+            rgb_feats = 4
+
     # low_dim_state
     observation_elements = []
     observation_elements.append(
@@ -56,7 +66,7 @@ def create_replay(batch_size: int, timesteps: int,
     # rgb, depth, point cloud, intrinsics, extrinsics
     for cname in cameras:
         observation_elements.append(
-            ObservationElement('%s_rgb' % cname, (3, *image_size,), np.float32))
+            ObservationElement('%s_rgb' % cname, (rgb_feats, *image_size,), np.float32))
         observation_elements.append(
             ObservationElement('%s_point_cloud' % cname, (3, *image_size),
                                np.float32))  # see pyrep/objects/vision_sensor.py on how pointclouds are extracted from depth frames
@@ -143,7 +153,6 @@ def _get_action(
     return trans_indicies, rot_and_grip_indicies, ignore_collisions, np.concatenate(
         [obs_tp1.gripper_pose, np.array([grip])]), attention_coordinates
 
-
 def _add_keypoints_to_replay(
         cfg: DictConfig,
         task: str,
@@ -159,7 +168,8 @@ def _add_keypoints_to_replay(
         crop_augmentation: bool,
         description: str = '',
         clip_model = None,
-        device = 'cpu'):
+        device = 'cpu',
+        dense_embedder=None):
     prev_action = None
     obs = inital_obs
     for k, keypoint in enumerate(episode_keypoints):
@@ -179,6 +189,9 @@ def _add_keypoints_to_replay(
         sentence_emb, token_embs = clip_model.encode_text_with_embeddings(token_tensor)
         obs_dict['lang_goal_emb'] = sentence_emb[0].float().detach().cpu().numpy()
         obs_dict['lang_token_embs'] = token_embs[0].float().detach().cpu().numpy()
+
+        if dense_embedder is not None:
+            update_clip_embs(dense_embedder, cameras, obs_dict, lang=description, cfg=cfg)
 
         prev_action = np.copy(action)
 
@@ -203,6 +216,8 @@ def _add_keypoints_to_replay(
                                      cameras=cameras, episode_length=cfg.rlbench.episode_length)
     obs_dict_tp1['lang_goal_emb'] = sentence_emb[0].float().detach().cpu().numpy()
     obs_dict_tp1['lang_token_embs'] = token_embs[0].float().detach().cpu().numpy()
+    if dense_embedder is not None:
+            update_clip_embs(dense_embedder, cameras, obs_dict_tp1, lang=description, cfg=cfg)
 
     obs_dict_tp1.pop('wrist_world_to_cam', None)
     obs_dict_tp1.update(final_obs)
@@ -233,6 +248,10 @@ def fill_replay(cfg: DictConfig,
         clip_model = build_model(model.state_dict())
         clip_model.to(device)
         del model
+    
+    dense_embedder = None    
+    if cfg.method.dense_clip_sims:
+        dense_embedder = CLIPEmbedder(device=device)
 
     logging.debug('Filling %s replay ...' % task)
     for d_idx in range(num_demos):
@@ -270,8 +289,10 @@ def fill_replay(cfg: DictConfig,
                 cfg, task, replay, obs, demo, episode_keypoints, cameras,
                 rlbench_scene_bounds, voxel_sizes, bounds_offset,
                 rotation_resolution, crop_augmentation, description=desc,
-                clip_model=clip_model, device=device)
+                clip_model=clip_model, device=device, dense_embedder=dense_embedder)
     logging.debug('Replay %s filled with demos.' % task)
+    if dense_embedder is not None:
+        del dense_embedder
 
 
 def fill_multi_task_replay(cfg: DictConfig,
@@ -339,6 +360,16 @@ def create_agent(cfg: DictConfig):
     LATENT_SIZE = 64
     depth_0bounds = cfg.rlbench.scene_bounds
     cam_resolution = cfg.rlbench.camera_resolution
+    initial_dim=3 + 3 + 1 + 3
+    voxel_feature_size=3
+    print("Dense clip sims: ", cfg.method.dense_clip_sims, ",No RGB: ", cfg.method.no_rgb)
+    if cfg.method.dense_clip_sims:
+        if cfg.method.no_rgb:
+            initial_dim=1 + 3 + 1 + 3
+            voxel_feature_size=1
+        else:
+            initial_dim=4 + 3 + 1 + 3    # Initial 4-> 3 rgb + 1 similarity
+            voxel_feature_size=4         # With the similarity feature
 
     num_rotation_classes = int(360. // cfg.method.rotation_resolution)
     qattention_agents = []
@@ -348,7 +379,7 @@ def create_agent(cfg: DictConfig):
             depth=cfg.method.transformer_depth,
             iterations=cfg.method.transformer_iterations,
             voxel_size=vox_size,
-            initial_dim = 3 + 3 + 1 + 3,
+            initial_dim = initial_dim,
             low_dim_size=4,
             layer=depth,
             num_rotation_classes=num_rotation_classes if last else 0,
@@ -395,7 +426,7 @@ def create_agent(cfg: DictConfig):
             include_low_dim_state=True,
             image_resolution=cam_resolution,
             batch_size=cfg.replay.batch_size,
-            voxel_feature_size=3,
+            voxel_feature_size=voxel_feature_size,
             lambda_weight_l2=cfg.method.lambda_weight_l2,
             num_rotation_classes=num_rotation_classes,
             rotation_resolution=cfg.method.rotation_resolution,

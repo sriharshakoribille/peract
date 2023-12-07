@@ -110,7 +110,9 @@ def run_seed(rank,
             cfg.replay.task_uniform,
             replay_path if cfg.replay.use_disk else None,
             cams, cfg.method.voxel_sizes,
-            cfg.rlbench.camera_resolution)
+            cfg.rlbench.camera_resolution,
+            dense_clip_sims=cfg.method.dense_clip_sims,
+            no_rgb=cfg.method.no_rgb)
 
         peract_bc.launch_utils.fill_multi_task_replay(
             cfg, obs_config, rank,

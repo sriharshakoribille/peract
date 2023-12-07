@@ -102,7 +102,9 @@ def eval_seed(train_cfg,
         env_device=env_device,
         rollout_generator=rg,
         num_eval_runs=len(tasks),
-        multi_task=multi_task)
+        multi_task=multi_task,
+        dense_clip_sims=train_cfg.method.dense_clip_sims,
+        no_rgb=train_cfg.method.no_rgb)
 
     manager = Manager()
     save_load_lock = manager.Lock()

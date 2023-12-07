@@ -61,3 +61,7 @@ no_skip_connection: False
 no_perceiver: False
 no_language: False
 keypoint_method: 'heuristic'
+
+# My additions
+dense_clip_sims: False
+no_rgb: False

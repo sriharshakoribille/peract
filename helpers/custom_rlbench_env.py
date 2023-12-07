@@ -14,7 +14,7 @@ from yarr.utils.process_str import change_case
 from pyrep.const import RenderMode
 from pyrep.errors import IKError, ConfigurationPathError
 from pyrep.objects import VisionSensor, Dummy
-
+from helpers.features.clip_extract import CLIPArgs, CLIPEmbedder
 
 
 class CustomRLBenchEnv(RLBenchEnv):
@@ -30,7 +30,9 @@ class CustomRLBenchEnv(RLBenchEnv):
                  headless: bool = True,
                  time_in_state: bool = False,
                  include_lang_goal_in_obs: bool = False,
-                 record_every_n: int = 20):
+                 record_every_n: int = 20,
+                 dense_clip_sims=None,
+                 no_rgb=None):
         super(CustomRLBenchEnv, self).__init__(
             task_class, observation_config, action_mode, dataset_root,
             channels_last, headless=headless,
@@ -51,6 +53,12 @@ class CustomRLBenchEnv(RLBenchEnv):
             'InvalidActionError': 0,
         }
         self._last_exception = None
+        self._dense_clip_sims = dense_clip_sims
+        self._no_rgb = no_rgb
+        self._dense_embedder = None
+        if self._dense_clip_sims is not None:
+            device = "cuda:0"
+            self._dense_embedder = CLIPEmbedder(device=device)
 
     @property
     def observation_elements(self) -> List[ObservationElement]:
@@ -60,6 +68,36 @@ class CustomRLBenchEnv(RLBenchEnv):
                 oe.shape = (oe.shape[0] - 7 * 3 + int(self._time_in_state),)  # remove pose and joint velocities as they will not be included
                 self.low_dim_state_len = oe.shape[0]
         return obs_elems
+    
+    def update_clip_embs(self, obs_dict, lang:str, no_rgb, cameras=['front','left_shoulder','right_shoulder','wrist']):
+        if self._dense_embedder is not None:
+            cam_imgs = []
+            for cam in cameras:
+                rgb= obs_dict['%s_rgb' % cam]
+                cam_imgs.append(np.transpose(rgb, [1, 2, 0]))
+            
+            if cam_imgs:
+                import cv2
+                img_embs = self._dense_embedder.image_embeddings(cam_imgs)
+
+                desc = lang.split()[-2] + ' ' + lang.split()[-1]
+                # desc = lang
+                print(desc)
+                text_embs = self._dense_embedder.text_embeddings([desc])
+                sims = img_embs @ text_embs.T
+                sims = sims.squeeze().cpu().numpy()
+
+                for i,cam in enumerate(cameras):
+                    sim_norm = (sims[i] - sims.min()) / (sims.max() - sims.min())
+                    sim_norm_scaled = cv2.resize((sim_norm * 255).astype(np.uint8), (128,128))
+                    if no_rgb:
+                        img_combined = np.expand_dims(sim_norm_scaled,axis=-1)
+                    else:
+                        img_combined = np.concatenate([cam_imgs[i],np.expand_dims(sim_norm_scaled,axis=-1)],axis=-1)
+                    img_combined = np.transpose(img_combined, [2, 0, 1])
+                    obs_dict['%s_rgb' % cam] = img_combined
+            else:
+                assert False, "No camera images found in observation."
 
     def extract_obs(self, obs: Observation, t=None, prev_action=None):
         obs.joint_velocities = None
@@ -88,6 +126,8 @@ class CustomRLBenchEnv(RLBenchEnv):
         obs.joint_positions = joint_pos
         obs.gripper_pose = grip_pose
         # obs_dict['gripper_pose'] = grip_pose
+        if self._dense_clip_sims is not None:
+            self.update_clip_embs(obs_dict, self._lang_goal, self._no_rgb)
         return obs_dict
 
     def launch(self):
