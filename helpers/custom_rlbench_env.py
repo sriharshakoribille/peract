@@ -56,7 +56,7 @@ class CustomRLBenchEnv(RLBenchEnv):
         self._dense_clip_sims = dense_clip_sims
         self._no_rgb = no_rgb
         self._dense_embedder = None
-        if self._dense_clip_sims is not None:
+        if self._dense_clip_sims is True:
             device = "cuda:0"
             self._dense_embedder = CLIPEmbedder(device=device)
 
@@ -80,8 +80,8 @@ class CustomRLBenchEnv(RLBenchEnv):
                 import cv2
                 img_embs = self._dense_embedder.image_embeddings(cam_imgs)
 
-                desc = lang.split()[-2] + ' ' + lang.split()[-1]
-                # desc = lang
+                # desc = lang.split()[-2] + ' ' + lang.split()[-1]
+                desc = lang
                 print(desc)
                 text_embs = self._dense_embedder.text_embeddings([desc])
                 sims = img_embs @ text_embs.T
@@ -126,7 +126,7 @@ class CustomRLBenchEnv(RLBenchEnv):
         obs.joint_positions = joint_pos
         obs.gripper_pose = grip_pose
         # obs_dict['gripper_pose'] = grip_pose
-        if self._dense_clip_sims is not None:
+        if self._dense_clip_sims is True:
             self.update_clip_embs(obs_dict, self._lang_goal, self._no_rgb)
         return obs_dict
 
