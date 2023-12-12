@@ -6,16 +6,17 @@ import logging
 from typing import List
 
 import numpy as np
-from rlbench.backend.observation import Observation
-from rlbench.observation_config import ObservationConfig
+# from rlbench.backend.observation import Observation
+# from rlbench.observation_config import ObservationConfig
+from helpers.observation_bullet import Observation_bullet, Demo_bullet
 import rlbench.utils as rlbench_utils
-from rlbench.demo import Demo
+# from rlbench.demo import Demo
 from yarr.replay_buffer.prioritized_replay_buffer import ObservationElement
 from yarr.replay_buffer.replay_buffer import ReplayElement, ReplayBuffer
 from yarr.replay_buffer.uniform_replay_buffer import UniformReplayBuffer
 from yarr.replay_buffer.task_uniform_replay_buffer import TaskUniformReplayBuffer
 
-from helpers import demo_loading_utils, utils
+from helpers import demo_loading_utils, utils, utils_bullet
 from helpers.preprocess_agent import PreprocessAgent
 from helpers.clip.core.clip import tokenize
 from agents.peract_bc.perceiver_lang_io import PerceiverVoxelLangEncoder
@@ -81,8 +82,6 @@ def create_replay(batch_size: int, timesteps: int,
                       np.int32),
         ReplayElement('rot_grip_action_indicies', (rot_and_grip_indicies_size,),
                       np.int32),
-        ReplayElement('ignore_collisions', (ignore_collisions_size,),
-                      np.int32),
         ReplayElement('gripper_pose', (gripper_pose_size,),
                       np.float32),
         ReplayElement('lang_goal_emb', (lang_feat_dim,),
@@ -116,8 +115,8 @@ def create_replay(batch_size: int, timesteps: int,
 
 
 def _get_action(
-        obs_tp1: Observation,
-        obs_tm1: Observation,
+        obs_tp1: Observation_bullet,
+        obs_tm1: Observation_bullet,
         rlbench_scene_bounds: List[float], # metric 3D bounds of the scene
         voxel_sizes: List[int],
         bounds_offset: List[float],
@@ -157,8 +156,8 @@ def _add_keypoints_to_replay(
         cfg: DictConfig,
         task: str,
         replay: ReplayBuffer,
-        inital_obs: Observation,
-        demo: Demo,
+        inital_obs: Observation_bullet,
+        demo: Demo_bullet,
         episode_keypoints: List[int],
         cameras: List[str],
         rlbench_scene_bounds: List[float],
@@ -182,7 +181,7 @@ def _add_keypoints_to_replay(
         terminal = (k == len(episode_keypoints) - 1)
         reward = float(terminal) * REWARD_SCALE if terminal else 0
 
-        obs_dict = utils.extract_obs(obs, t=k, prev_action=prev_action,
+        obs_dict = utils_bullet.extract_obs(obs, t=k, prev_action=prev_action,
                                      cameras=cameras, episode_length=cfg.rlbench.episode_length)
         tokens = tokenize([description]).numpy()
         token_tensor = torch.from_numpy(tokens).to(device)
@@ -212,7 +211,7 @@ def _add_keypoints_to_replay(
         obs = obs_tp1
 
     # final step
-    obs_dict_tp1 = utils.extract_obs(obs_tp1, t=k + 1, prev_action=prev_action,
+    obs_dict_tp1 = utils_bullet.extract_obs(obs_tp1, t=k + 1, prev_action=prev_action,
                                      cameras=cameras, episode_length=cfg.rlbench.episode_length)
     obs_dict_tp1['lang_goal_emb'] = sentence_emb[0].float().detach().cpu().numpy()
     obs_dict_tp1['lang_token_embs'] = token_embs[0].float().detach().cpu().numpy()
@@ -239,6 +238,7 @@ def fill_replay(cfg: DictConfig,
                 rotation_resolution: int,
                 crop_augmentation: bool,
                 clip_model = None,
+                demo_path = None,
                 device = 'cpu',
                 keypoint_method = 'heuristic'):
     logging.getLogger().setLevel(cfg.framework.logging_level)
@@ -256,18 +256,24 @@ def fill_replay(cfg: DictConfig,
     logging.debug('Filling %s replay ...' % task)
     for d_idx in range(num_demos):
         # load demo from disk
-        demo = rlbench_utils.get_stored_demos(
-            amount=1, image_paths=False,
-            dataset_root=cfg.rlbench.demo_path,
-            variation_number=-1, task_name=task,
-            obs_config=obs_config,
-            random_selection=False,
-            from_episode_number=d_idx)[0]
+        # demo = rlbench_utils.get_stored_demos(
+        #     amount=1, image_paths=False,
+        #     dataset_root=cfg.rlbench.demo_path,
+        #     variation_number=-1, task_name=task,
+        #     obs_config=obs_config,
+        #     random_selection=False,
+        #     from_episode_number=d_idx)[0]
+        print("Filling demo %d" % d_idx)
+        demo = Demo_bullet(utils_bullet.extract_demo(episode=d_idx, save_dir=demo_path))
 
-        descs = demo._observations[0].misc['descriptions']
+        # descs = demo._observations[0].misc['descriptions']
+        # get language goal from disk
+        descs = utils_bullet.extract_demo(episode=d_idx, save_dir=demo_path, desc=True)
 
         # extract keypoints (a.k.a keyframes)
-        episode_keypoints = demo_loading_utils.keypoint_discovery(demo, method=keypoint_method)
+        # episode_keypoints = demo_loading_utils.keypoint_discovery(demo, method=keypoint_method)
+        episode_keypoints = utils_bullet.extract_demo(episode=d_idx, save_dir=demo_path, kps=True)
+        print("Keypoints: ", episode_keypoints)
 
         if rank == 0:
             logging.info(f"Loading Demo({d_idx}) - found {len(episode_keypoints)} keypoints - {task}")
@@ -279,7 +285,7 @@ def fill_replay(cfg: DictConfig,
                 continue
 
             obs = demo[i]
-            desc = descs[0]
+            desc = descs
             # if our starting point is past one of the keypoints, then remove it
             while len(episode_keypoints) > 0 and i >= episode_keypoints[0]:
                 episode_keypoints = episode_keypoints[1:]
@@ -384,7 +390,7 @@ def create_agent(cfg: DictConfig):
             layer=depth,
             num_rotation_classes=num_rotation_classes if last else 0,
             num_grip_classes=2 if last else 0,
-            num_collision_classes=2 if last else 0,
+            # num_collision_classes=2 if last else 0,
             input_axis=3,
             num_latents = cfg.method.num_latents,
             latent_dim = cfg.method.latent_dim,
@@ -422,7 +428,7 @@ def create_agent(cfg: DictConfig):
             trans_loss_weight=cfg.method.trans_loss_weight,
             rot_loss_weight=cfg.method.rot_loss_weight,
             grip_loss_weight=cfg.method.grip_loss_weight,
-            collision_loss_weight=cfg.method.collision_loss_weight,
+            # collision_loss_weight=cfg.method.collision_loss_weight,
             include_low_dim_state=True,
             image_resolution=cam_resolution,
             batch_size=cfg.replay.batch_size,

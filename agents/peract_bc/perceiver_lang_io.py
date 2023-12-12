@@ -144,7 +144,7 @@ class PerceiverVoxelLangEncoder(nn.Module):
             layer=0,
             num_rotation_classes=72,  # 5 degree increments (5*72=360) for each of the 3-axis
             num_grip_classes=2,       # open or not open
-            num_collision_classes=2,  # collisions allowed or not allowed
+            # num_collision_classes=2,  # collisions allowed or not allowed
             input_axis=3,             # 3D tensors have 3 axes
             num_latents=512,          # number of latent vectors
             im_channels=64,           # intermediate channel size
@@ -182,7 +182,7 @@ class PerceiverVoxelLangEncoder(nn.Module):
         self.voxel_patch_stride = voxel_patch_stride
         self.num_rotation_classes = num_rotation_classes
         self.num_grip_classes = num_grip_classes
-        self.num_collision_classes = num_collision_classes
+        # self.num_collision_classes = num_collision_classes
         self.final_dim = final_dim
         self.input_dropout = input_dropout
         self.attn_dropout = attn_dropout
@@ -321,8 +321,7 @@ class PerceiverVoxelLangEncoder(nn.Module):
 
             self.rot_grip_collision_ff = DenseBlock(self.final_dim,
                                                     self.num_rotation_classes * 3 + \
-                                                    self.num_grip_classes + \
-                                                    self.num_collision_classes,
+                                                    self.num_grip_classes,
                                                     None, None)
 
     def encode_text(self, x):
@@ -465,7 +464,8 @@ class PerceiverVoxelLangEncoder(nn.Module):
             dense1 = self.dense1(dense0)                     # [B,72*3+2+2]
 
             rot_and_grip_collision_out = self.rot_grip_collision_ff(dense1)
-            rot_and_grip_out = rot_and_grip_collision_out[:, :-self.num_collision_classes]
-            collision_out = rot_and_grip_collision_out[:, -self.num_collision_classes:]
+            # rot_and_grip_out = rot_and_grip_collision_out[:, :-self.num_collision_classes]
+            # collision_out = rot_and_grip_collision_out[:, -self.num_collision_classes:]
 
-        return trans, rot_and_grip_out, collision_out
+        # return trans, rot_and_grip_out, collision_out
+        return trans, rot_and_grip_collision_out

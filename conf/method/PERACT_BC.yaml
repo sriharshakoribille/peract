@@ -9,7 +9,7 @@ voxel_sizes: [100]
 include_prev_layer: False
 
 # Perceiver
-num_latents: 2048
+num_latents: 512
 latent_dim: 512
 transformer_depth: 6
 transformer_iterations: 1

@@ -52,10 +52,10 @@ class QFunction(nn.Module):
         indices = torch.cat([((idxs // h) // d), (idxs // h) % w, idxs % w], 1)
         return indices
 
-    def choose_highest_action(self, q_trans, q_rot_grip, q_collision):
+    def choose_highest_action(self, q_trans, q_rot_grip):
         coords = self._argmax_3d(q_trans)
         rot_and_grip_indicies = None
-        ignore_collision = None
+        # ignore_collision = None
         if q_rot_grip is not None:
             q_rot = torch.stack(torch.split(
                 q_rot_grip[:, :-2],
@@ -66,8 +66,9 @@ class QFunction(nn.Module):
                  q_rot[:, 1:2].argmax(-1),
                  q_rot[:, 2:3].argmax(-1),
                  q_rot_grip[:, -2:].argmax(-1, keepdim=True)], -1)
-            ignore_collision = q_collision[:, -2:].argmax(-1, keepdim=True)
-        return coords, rot_and_grip_indicies, ignore_collision
+            # ignore_collision = q_collision[:, -2:].argmax(-1, keepdim=True)
+        # return coords, rot_and_grip_indicies, ignore_collision
+        return coords, rot_and_grip_indicies
 
     def forward(self, rgb_pcd, proprio, pcd, lang_goal_emb, lang_token_embs,
                 bounds=None, prev_bounds=None, prev_layer_voxel_grid=None):
@@ -95,8 +96,7 @@ class QFunction(nn.Module):
 
         # forward pass
         q_trans, \
-        q_rot_and_grip,\
-        q_ignore_collisions = self._qnet(voxel_grid, 
+        q_rot_and_grip = self._qnet(voxel_grid, 
                                          proprio,
                                          lang_goal_emb, 
                                          lang_token_embs,
@@ -104,7 +104,7 @@ class QFunction(nn.Module):
                                          bounds, 
                                          prev_bounds)
 
-        return q_trans, q_rot_and_grip, q_ignore_collisions, voxel_grid
+        return q_trans, q_rot_and_grip, voxel_grid
 
 
 class QAttentionPerActBCAgent(Agent):
@@ -128,7 +128,7 @@ class QAttentionPerActBCAgent(Agent):
                  trans_loss_weight: float = 1.0,
                  rot_loss_weight: float = 1.0,
                  grip_loss_weight: float = 1.0,
-                 collision_loss_weight: float = 1.0,
+                #  collision_loss_weight: float = 1.0,
                  include_low_dim_state: bool = False,
                  image_resolution: list = None,
                  lambda_weight_l2: float = 0.0,
@@ -152,7 +152,7 @@ class QAttentionPerActBCAgent(Agent):
         self._trans_loss_weight = trans_loss_weight
         self._rot_loss_weight = rot_loss_weight
         self._grip_loss_weight = grip_loss_weight
-        self._collision_loss_weight = collision_loss_weight
+        # self._collision_loss_weight = collision_loss_weight
         self._include_low_dim_state = include_low_dim_state
         self._image_resolution = image_resolution or [128, 128]
         self._voxel_size = voxel_size
@@ -256,10 +256,10 @@ class QAttentionPerActBCAgent(Agent):
                                                            2),
                                                            dtype=int,
                                                            device=device)
-            self._action_ignore_collisions_one_hot_zeros = torch.zeros((self._batch_size,
-                                                                        2),
-                                                                        dtype=int,
-                                                                        device=device)
+            # self._action_ignore_collisions_one_hot_zeros = torch.zeros((self._batch_size,
+            #                                                             2),
+            #                                                             dtype=int,
+            #                                                             device=device)
 
             # print total params
             logging.info('# Q Params: %d' % sum(
@@ -360,15 +360,15 @@ class QAttentionPerActBCAgent(Agent):
                           q_rot_z_flat_softmax,
                           q_grip_flat_softmax], dim=1)
 
-    def _softmax_ignore_collision(self, q_collision):
-        q_collision_softmax = F.softmax(q_collision, dim=1)
-        return q_collision_softmax
+    # def _softmax_ignore_collision(self, q_collision):
+    #     q_collision_softmax = F.softmax(q_collision, dim=1)
+    #     return q_collision_softmax
 
     def update(self, step: int, replay_sample: dict) -> dict:
         action_trans = replay_sample['trans_action_indicies'][:, self._layer * 3:self._layer * 3 + 3].int()
         action_rot_grip = replay_sample['rot_grip_action_indicies'].int()
         action_gripper_pose = replay_sample['gripper_pose']
-        action_ignore_collisions = replay_sample['ignore_collisions'].int()
+        # action_ignore_collisions = replay_sample['ignore_collisions'].int()
         lang_goal_emb = replay_sample['lang_goal_emb'].float()
         lang_token_embs = replay_sample['lang_token_embs'].float()
         prev_layer_voxel_grid = replay_sample.get('prev_layer_voxel_grid', None)
@@ -408,7 +408,6 @@ class QAttentionPerActBCAgent(Agent):
 
         # forward pass
         q_trans, q_rot_grip, \
-        q_collision, \
         voxel_grid = self._q(obs,
                              proprio,
                              pcd,
@@ -420,10 +419,9 @@ class QAttentionPerActBCAgent(Agent):
 
         # argmax to choose best action
         coords, \
-        rot_and_grip_indicies, \
-        ignore_collision_indicies = self._q.choose_highest_action(q_trans, q_rot_grip, q_collision)
+        rot_and_grip_indicies = self._q.choose_highest_action(q_trans, q_rot_grip)
 
-        q_trans_loss, q_rot_loss, q_grip_loss, q_collision_loss = 0., 0., 0., 0.
+        q_trans_loss, q_rot_loss, q_grip_loss = 0., 0., 0.
 
         # translation one-hot
         action_trans_one_hot = self._action_trans_one_hot_zeros.clone()
@@ -443,7 +441,7 @@ class QAttentionPerActBCAgent(Agent):
             action_rot_y_one_hot = self._action_rot_y_one_hot_zeros.clone()
             action_rot_z_one_hot = self._action_rot_z_one_hot_zeros.clone()
             action_grip_one_hot = self._action_grip_one_hot_zeros.clone()
-            action_ignore_collisions_one_hot = self._action_ignore_collisions_one_hot_zeros.clone()
+            # action_ignore_collisions_one_hot = self._action_ignore_collisions_one_hot_zeros.clone()
 
             for b in range(bs):
                 gt_rot_grip = action_rot_grip[b, :].int()
@@ -452,15 +450,15 @@ class QAttentionPerActBCAgent(Agent):
                 action_rot_z_one_hot[b, gt_rot_grip[2]] = 1
                 action_grip_one_hot[b, gt_rot_grip[3]] = 1
 
-                gt_ignore_collisions = action_ignore_collisions[b, :].int()
-                action_ignore_collisions_one_hot[b, gt_ignore_collisions[0]] = 1
+                # gt_ignore_collisions = action_ignore_collisions[b, :].int()
+                # action_ignore_collisions_one_hot[b, gt_ignore_collisions[0]] = 1
 
             # flatten predictions
             q_rot_x_flat = q_rot_grip[:, 0*self._num_rotation_classes:1*self._num_rotation_classes]
             q_rot_y_flat = q_rot_grip[:, 1*self._num_rotation_classes:2*self._num_rotation_classes]
             q_rot_z_flat = q_rot_grip[:, 2*self._num_rotation_classes:3*self._num_rotation_classes]
             q_grip_flat =  q_rot_grip[:, 3*self._num_rotation_classes:]
-            q_ignore_collisions_flat = q_collision
+            # q_ignore_collisions_flat = q_collision
 
             # rotation loss
             q_rot_loss += self._celoss(q_rot_x_flat, action_rot_x_one_hot)
@@ -471,12 +469,12 @@ class QAttentionPerActBCAgent(Agent):
             q_grip_loss += self._celoss(q_grip_flat, action_grip_one_hot)
 
             # collision loss
-            q_collision_loss += self._celoss(q_ignore_collisions_flat, action_ignore_collisions_one_hot)
+            # q_collision_loss += self._celoss(q_ignore_collisions_flat, action_ignore_collisions_one_hot)
 
         combined_losses = (q_trans_loss * self._trans_loss_weight) + \
                           (q_rot_loss * self._rot_loss_weight) + \
-                          (q_grip_loss * self._grip_loss_weight) + \
-                          (q_collision_loss * self._collision_loss_weight)
+                          (q_grip_loss * self._grip_loss_weight)
+                        #   (q_collision_loss * self._collision_loss_weight)
         total_loss = combined_losses.mean()
 
         self._optimizer.zero_grad()
@@ -488,7 +486,7 @@ class QAttentionPerActBCAgent(Agent):
             'losses/trans_loss': q_trans_loss.mean(),
             'losses/rot_loss': q_rot_loss.mean() if with_rot_and_grip else 0.,
             'losses/grip_loss': q_grip_loss.mean() if with_rot_and_grip else 0.,
-            'losses/collision_loss': q_collision_loss.mean() if with_rot_and_grip else 0.,
+            # 'losses/collision_loss': q_collision_loss.mean() if with_rot_and_grip else 0.,
         }
 
         if self._lr_scheduler:
@@ -555,7 +553,7 @@ class QAttentionPerActBCAgent(Agent):
         # inference
         q_trans, \
         q_rot_grip, \
-        q_ignore_collisions, \
+        # q_ignore_collisions, \
         vox_grid = self._q(obs,
                            proprio,
                            pcd,
@@ -568,16 +566,15 @@ class QAttentionPerActBCAgent(Agent):
         # softmax Q predictions
         q_trans = self._softmax_q_trans(q_trans)
         q_rot_grip =  self._softmax_q_rot_grip(q_rot_grip) if q_rot_grip is not None else q_rot_grip
-        q_ignore_collisions = self._softmax_ignore_collision(q_ignore_collisions) \
-            if q_ignore_collisions is not None else q_ignore_collisions
+        # q_ignore_collisions = self._softmax_ignore_collision(q_ignore_collisions) \
+        #     if q_ignore_collisions is not None else q_ignore_collisions
 
         # argmax Q predictions
         coords, \
-        rot_and_grip_indicies, \
-        ignore_collisions = self._q.choose_highest_action(q_trans, q_rot_grip, q_ignore_collisions)
+        rot_and_grip_indicies = self._q.choose_highest_action(q_trans, q_rot_grip)
 
         rot_grip_action = rot_and_grip_indicies if q_rot_grip is not None else None
-        ignore_collisions_action = ignore_collisions.int() if ignore_collisions is not None else None
+        # ignore_collisions_action = ignore_collisions.int() if ignore_collisions is not None else None
 
         coords = coords.int()
         attention_coordinate = bounds[:, :3] + res * coords + res / 2
@@ -607,7 +604,7 @@ class QAttentionPerActBCAgent(Agent):
         self._act_voxel_grid = vox_grid[0]
         self._act_max_coordinate = coords[0]
         self._act_qvalues = q_trans[0].detach()
-        return ActResult((coords, rot_grip_action, ignore_collisions_action),
+        return ActResult((coords, rot_grip_action),
                          observation_elements=observation_elements,
                          info=info)
 

@@ -34,9 +34,11 @@ def main(cfg: DictConfig) -> None:
 
     cfg.rlbench.cameras = cfg.rlbench.cameras \
         if isinstance(cfg.rlbench.cameras, ListConfig) else [cfg.rlbench.cameras]
-    obs_config = create_obs_config(cfg.rlbench.cameras,
-                                   cfg.rlbench.camera_resolution,
-                                   cfg.method.name)
+    # obs_config = create_obs_config(cfg.rlbench.cameras,
+    #                                cfg.rlbench.camera_resolution,
+    #                                cfg.method.name)
+    obs_config = None
+
     multi_task = len(cfg.rlbench.tasks) > 1
 
     cwd = os.getcwd()

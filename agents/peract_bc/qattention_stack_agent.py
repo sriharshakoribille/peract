@@ -47,19 +47,21 @@ class QAttentionStackAgent(Agent):
             deterministic=False) -> ActResult:
 
         observation_elements = {}
-        translation_results, rot_grip_results, ignore_collisions_results = [], [], []
+        # translation_results, rot_grip_results, ignore_collisions_results = [], [], []
+        translation_results, rot_grip_results = [], []
         infos = {}
         for depth, qagent in enumerate(self._qattention_agents):
             act_results = qagent.act(step, observation, deterministic)
             attention_coordinate = act_results.observation_elements['attention_coordinate'].cpu().numpy()
             observation_elements['attention_coordinate_layer_%d' % depth] = attention_coordinate[0]
 
-            translation_idxs, rot_grip_idxs, ignore_collisions_idxs = act_results.action
+            # translation_idxs, rot_grip_idxs, ignore_collisions_idxs = act_results.action
+            translation_idxs, rot_grip_idxs = act_results.action
             translation_results.append(translation_idxs)
             if rot_grip_idxs is not None:
                 rot_grip_results.append(rot_grip_idxs)
-            if ignore_collisions_idxs is not None:
-                ignore_collisions_results.append(ignore_collisions_idxs)
+            # if ignore_collisions_idxs is not None:
+            #     ignore_collisions_results.append(ignore_collisions_idxs)
 
             observation['attention_coordinate'] = act_results.observation_elements['attention_coordinate']
             observation['prev_layer_voxel_grid'] = act_results.observation_elements['prev_layer_voxel_grid']
@@ -77,14 +79,14 @@ class QAttentionStackAgent(Agent):
             infos.update(act_results.info)
 
         rgai = torch.cat(rot_grip_results, 1)[0].cpu().numpy()
-        ignore_collisions = float(torch.cat(ignore_collisions_results, 1)[0].cpu().numpy())
+        # ignore_collisions = float(torch.cat(ignore_collisions_results, 1)[0].cpu().numpy())
         observation_elements['trans_action_indicies'] = torch.cat(translation_results, 1)[0].cpu().numpy()
         observation_elements['rot_grip_action_indicies'] = rgai
         continuous_action = np.concatenate([
             act_results.observation_elements['attention_coordinate'].cpu().numpy()[0],
             utils.discrete_euler_to_quaternion(rgai[-4:-1], self._rotation_resolution),
             rgai[-1:],
-            [ignore_collisions],
+            # [ignore_collisions],
         ])
         return ActResult(
             continuous_action,
