@@ -13,7 +13,7 @@ from yarr.agents.agent import Agent, ActResult, ScalarSummary, \
     HistogramSummary, ImageSummary, Summary
 
 from helpers import utils
-from helpers.utils import visualise_voxel, stack_on_channel
+from helpers.utils import visualise_voxel, stack_on_channel, visualise_voxel_mine
 from voxel.voxel_grid import VoxelGrid
 from voxel.augmentation import apply_se3_augmentation
 from einops import rearrange
@@ -641,6 +641,9 @@ class QAttentionPerActBCAgent(Agent):
         return summaries
 
     def act_summaries(self) -> List[Summary]:
+        # visualise_voxel_mine(self._act_voxel_grid.cpu().numpy(), 
+        #                 self._act_qvalues.cpu().numpy(), 
+        #                 self._act_max_coordinate.cpu().numpy())
         return [
             ImageSummary('%s/act_Qattention' % self._name,
                          transforms.ToTensor()(visualise_voxel(

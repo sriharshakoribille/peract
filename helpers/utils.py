@@ -9,6 +9,7 @@ from rlbench.backend.observation import Observation
 from rlbench import CameraConfig, ObservationConfig
 from pyrep.const import RenderMode
 from typing import List
+import matplotlib.pyplot as plt
 
 REMOVE_KEYS = ['joint_velocities', 'joint_positions', 'joint_forces',
                'gripper_open', 'gripper_pose',
@@ -245,6 +246,104 @@ def visualise_voxel(voxel_grid: np.ndarray,
         color, depth = r.render(s)
         return color.copy()
 
+def create_voxel_scene_mine(
+        voxel_grid: np.ndarray,
+        q_attention: np.ndarray = None,
+        highlight_coordinate: np.ndarray = None,
+        highlight_gt_coordinate: np.ndarray = None,
+        highlight_alpha: float = 1.0,
+        voxel_size: float = 0.1,
+        alpha: float = 0.5):
+    _, d, h, w = voxel_grid.shape
+    v = voxel_grid.transpose((1, 2, 3, 0))
+    occupancy = v[:, :, :, -1] != 0
+    alpha = np.expand_dims(np.full_like(occupancy, alpha, dtype=np.float32), -1)
+    rgb=None
+
+    if v.shape[-1]==11:     # Clip embedded rgb values
+        cm=plt.get_cmap('jet')
+        hmap = cm(v[..., 6])
+        rgb = np.concatenate([hmap[:,:,:,:3],alpha],axis=-1)
+    elif v.shape[-1]==8:    # Just Clip embeddings without rgb
+        cm=plt.get_cmap('jet')
+        hmap = cm(v[..., 3])
+        rgb = np.concatenate([hmap[:,:,:,:3],alpha],axis=-1)
+    elif v.shape[-1]==1:    # action predictions
+        cm=plt.get_cmap('jet')
+        hmap = cm(v[..., -1])
+        rgb = np.concatenate([hmap[:,:,:,:3],alpha],axis=-1)
+    else:                   # Plain rgb values
+        rgb = np.concatenate([(v[:, :, :, 3:6] + 1)/ 2.0, alpha], axis=-1)
+        
+    if q_attention is not None:
+        q = np.max(q_attention, 0)
+        q = q / np.max(q)
+        show_q = (q > 0.75)
+        occupancy = (show_q + occupancy).astype(bool)
+        q = np.expand_dims(q - 0.5, -1)  # Max q can be is 0.9
+        q_rgb = np.concatenate([
+            q, np.zeros_like(q), np.zeros_like(q),
+            np.clip(q, 0, 1)], axis=-1)
+        rgb = np.where(np.expand_dims(show_q, -1), q_rgb, rgb)
+
+    if highlight_coordinate is not None:
+        x, y, z = highlight_coordinate
+        occupancy[x, y, z] = True
+        rgb[x, y, z] = [1.0, 0.0, 0.0, highlight_alpha]
+
+    if highlight_gt_coordinate is not None:
+        x, y, z = highlight_gt_coordinate
+        occupancy[x, y, z] = True
+        rgb[x, y, z] = [0.0, 0.0, 1.0, highlight_alpha]
+
+    transform = trimesh.transformations.scale_and_translate(
+        scale=voxel_size, translate=(0.0, 0.0, 0.0))
+    trimesh_voxel_grid = trimesh.voxel.VoxelGrid(
+        encoding=occupancy, transform=transform)
+    geometry = trimesh_voxel_grid.as_boxes(colors=rgb)
+    scene = trimesh.Scene()
+    scene.add_geometry(geometry)
+    return scene
+
+def visualise_voxel_mine(voxel_grid: np.ndarray, q_attention: np.ndarray = None,
+                    highlight_coordinate: np.ndarray = None,
+                    highlight_gt_coordinate: np.ndarray = None,
+                    highlight_alpha: float = 1.0,
+                    voxel_size: float = 0.1,alpha: float = 0.5,
+                    render_gripper=False,
+                    gripper_pose=None,
+                    gripper_pose_gt=None,
+                    gripper_mesh_scale=1.0):
+    scene = create_voxel_scene_mine(voxel_grid = voxel_grid, 
+                               q_attention = q_attention,
+                               highlight_coordinate = highlight_coordinate,
+                               highlight_gt_coordinate = highlight_gt_coordinate,
+                               voxel_size = voxel_size, alpha = alpha)
+    scene_pr = _from_trimesh_scene(scene, ambient_light=[0.8, 0.8, 0.8], bg_color=[1.0, 1.0, 1.0])
+    if render_gripper:
+            gripper_trimesh = trimesh.load('/home/harsha/study/ws/project_ws/src/transfmmer/models/meshes/hand.dae', force='mesh')
+            gripper_trimesh.vertices *= gripper_mesh_scale
+            radii = np.linalg.norm(gripper_trimesh.vertices - gripper_trimesh.center_mass, axis=1)
+            gripper_trimesh.visual.vertex_colors = trimesh.visual.interpolate(radii * gripper_mesh_scale, color_map='winter')
+            gripper_mesh = pyrender.Mesh.from_trimesh(gripper_trimesh, poses=np.array([gripper_pose]), smooth=False)
+            scene_pr.add(gripper_mesh)
+
+            if gripper_pose_gt is not None:
+                gripper_trimesh_gt = trimesh.load('/home/harsha/study/ws/project_ws/src/transfmmer/models/meshes/hand.dae', force='mesh')
+                gripper_trimesh_gt.vertices *= gripper_mesh_scale
+                radii = np.linalg.norm(gripper_trimesh_gt.vertices - gripper_trimesh_gt.center_mass, axis=1)
+                gripper_trimesh_gt.visual.vertex_colors = trimesh.visual.interpolate(radii * gripper_mesh_scale, color_map='autumn')
+                # gripper_pose_gt[:3, 3] += np.array([0, 0, 0.1])
+                gripper_mesh_gt = pyrender.Mesh.from_trimesh(gripper_trimesh_gt, poses=np.array([gripper_pose_gt]), smooth=False)
+                scene_pr.add(gripper_mesh_gt) 
+    
+    # pose = Transform.from_xyz_rpy(2.5,6,4,np.deg2rad(60), 0, np.deg2rad(180)).matrix()
+    pose = np.eye(4)
+    pose[:3, 3] = [2.5,6,4]
+    pose[:3, :3] = Rotation.from_euler('xyz', [np.deg2rad(60), 0, np.deg2rad(180)]).as_matrix()        
+    actcam= pyrender.PerspectiveCamera(yfov=np.pi / 3.0, znear=0.05, zfar=100)
+    cam_node = scene_pr.add(actcam, pose=pose)    
+    vr = pyrender.Viewer(scene_pr)
 
 def preprocess(img, dist='transporter'):
     """Pre-process input (subtract mean, divide by std)."""
