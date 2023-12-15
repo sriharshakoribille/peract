@@ -21,6 +21,7 @@ def extract_clip_features(image_paths: List[str], device: torch.device) -> torch
     """Extract dense patch-level CLIP features for given images"""
 
     model, preprocess = clip.load(CLIPArgs.model_name, device=device)
+    # model, preprocess = clip.load("RN50", device=device)
     print(f"Loaded CLIP model {CLIPArgs.model_name}")
 
     # Patch the preprocess if we want to skip center crop
@@ -158,8 +159,8 @@ def update_clip_embs(dense_embedder, cameras, obs_dict, lang:str, cfg):
             import cv2
             img_embs = dense_embedder.image_embeddings(cam_imgs)
 
-            desc = lang.split()[-2] + ' ' + lang.split()[-1]
-            # desc = lang
+            # desc = lang.split()[-2] + ' ' + lang.split()[-1]
+            desc = lang
             print(desc)
             text_embs = dense_embedder.text_embeddings([desc])
             sims = img_embs @ text_embs.T
