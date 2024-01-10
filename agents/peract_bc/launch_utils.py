@@ -191,7 +191,9 @@ def _add_keypoints_to_replay(
         obs_dict['lang_token_embs'] = token_embs[0].float().detach().cpu().numpy()
 
         if dense_embedder is not None:
-            update_clip_embs(dense_embedder, cameras, obs_dict, lang=description, cfg=cfg)
+            update_clip_embs(obs_dict=obs_dict, lang=description, no_rgb=cfg.method.no_rgb,
+                             dense_embedder=dense_embedder, cameras=cameras, 
+                             camera_resolution=cfg.rlbench.camera_resolution)
 
         prev_action = np.copy(action)
 
@@ -217,7 +219,9 @@ def _add_keypoints_to_replay(
     obs_dict_tp1['lang_goal_emb'] = sentence_emb[0].float().detach().cpu().numpy()
     obs_dict_tp1['lang_token_embs'] = token_embs[0].float().detach().cpu().numpy()
     if dense_embedder is not None:
-            update_clip_embs(dense_embedder, cameras, obs_dict_tp1, lang=description, cfg=cfg)
+        update_clip_embs(obs_dict=obs_dict_tp1, lang=description, no_rgb=cfg.method.no_rgb,
+                            dense_embedder=dense_embedder, cameras=cameras, 
+                            camera_resolution=cfg.rlbench.camera_resolution)
 
     obs_dict_tp1.pop('wrist_world_to_cam', None)
     obs_dict_tp1.update(final_obs)

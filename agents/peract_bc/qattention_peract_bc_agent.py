@@ -612,22 +612,23 @@ class QAttentionPerActBCAgent(Agent):
                          info=info)
 
     def update_summaries(self) -> List[Summary]:
-        summaries = [
-            ImageSummary('%s/update_qattention' % self._name,
-                         transforms.ToTensor()(visualise_voxel(
-                             self._vis_voxel_grid.detach().cpu().numpy(),
-                             self._vis_translation_qvalue.detach().cpu().numpy(),
-                             self._vis_max_coordinate.detach().cpu().numpy(),
-                             self._vis_gt_coordinate.detach().cpu().numpy())))
-        ]
+        # summaries = [
+        #     ImageSummary('%s/update_qattention' % self._name,
+        #                  transforms.ToTensor()(visualise_voxel(
+        #                      self._vis_voxel_grid.detach().cpu().numpy(),
+        #                      self._vis_translation_qvalue.detach().cpu().numpy(),
+        #                      self._vis_max_coordinate.detach().cpu().numpy(),
+        #                      self._vis_gt_coordinate.detach().cpu().numpy())))
+        # ]
+        summaries = []
 
         for n, v in self._summaries.items():
             summaries.append(ScalarSummary('%s/%s' % (self._name, n), v))
 
-        for (name, crop) in (self._crop_summary):
-            crops = (torch.cat(torch.split(crop, 3, dim=1), dim=3) + 1.0) / 2.0
-            summaries.extend([
-                ImageSummary('%s/crops/%s' % (self._name, name), crops)])
+        # for (name, crop) in (self._crop_summary):
+        #     crops = (torch.cat(torch.split(crop, 3, dim=1), dim=3) + 1.0) / 2.0
+        #     summaries.extend([
+        #         ImageSummary('%s/crops/%s' % (self._name, name), crops)])
 
         for tag, param in self._q.named_parameters():
             # assert not torch.isnan(param.grad.abs() <= 1.0).all()

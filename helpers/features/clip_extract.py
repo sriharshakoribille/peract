@@ -148,7 +148,9 @@ class CLIPEmbedder:
         text_embs /= text_embs.norm(dim=-1, keepdim=True)
         return text_embs
 
-def update_clip_embs(dense_embedder, cameras, obs_dict, lang:str, cfg):
+def update_clip_embs(obs_dict, lang:str, no_rgb=False, dense_embedder=None, 
+                     cameras=['front','left_shoulder','right_shoulder','wrist'],
+                     camera_resolution=[128,128]):
     if dense_embedder is not None:
         cam_imgs = []
         for cam in cameras:
@@ -168,8 +170,8 @@ def update_clip_embs(dense_embedder, cameras, obs_dict, lang:str, cfg):
 
             for i,cam in enumerate(cameras):
                 sim_norm = (sims[i] - sims.min()) / (sims.max() - sims.min())
-                sim_norm_scaled = cv2.resize((sim_norm * 255).astype(np.uint8), tuple(cfg.rlbench.camera_resolution))
-                if cfg.method.no_rgb:
+                sim_norm_scaled = cv2.resize((sim_norm * 255).astype(np.uint8), tuple(camera_resolution))
+                if no_rgb:
                     img_combined = np.expand_dims(sim_norm_scaled,axis=-1)
                 else:
                     img_combined = np.concatenate([cam_imgs[i],np.expand_dims(sim_norm_scaled,axis=-1)],axis=-1)
