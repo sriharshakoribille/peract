@@ -219,11 +219,19 @@ class ResidualAttentionBlock(nn.Module):
         v_in_proj_weight = self.attn.in_proj_weight[-self.attn.embed_dim:]
         v_in_proj_bias = self.attn.in_proj_bias[-self.attn.embed_dim:]
 
+        # k_in_proj_weight = self.attn.in_proj_weight[self.attn.embed_dim:2*self.attn.embed_dim]
+        # q_in_proj_bias = self.attn.in_proj_bias[self.attn.embed_dim:2*self.attn.embed_dim]
+
         v_in = F.linear(self.ln_1(x), v_in_proj_weight, v_in_proj_bias)
         v_out = F.linear(v_in, self.attn.out_proj.weight, self.attn.out_proj.bias)
 
         # Using the value features works the best. Adding this to 'x' or feeding 'v' to the LayerNorm then MLP degrades the performance
         return v_out
+    
+    def forward_mine(self, x: torch.Tensor):
+        x = x + self.attention(self.ln_1(x))
+        # x = x + self.mlp(self.ln_2(x))
+        return x
 
 
     def forward(self, x: torch.Tensor):
